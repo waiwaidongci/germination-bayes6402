@@ -1,0 +1,1 @@
+export function Notice({message,onRetry}:{message:string;onRetry?:()=>void}){return message?<div role="alert" className="notice">{message}{onRetry&&<button onClick={onRetry}>重新载入</button>}</div>:null}

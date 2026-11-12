@@ -1,0 +1,1 @@
+import {Study} from '../types/domain';export function StudySelector({studies,value,onChange}:{studies:Study[];value:number;onChange:(id:number)=>void}){return <label>批次研究<select aria-label="批次研究" value={value} onChange={e=>onChange(Number(e.target.value))}>{studies.map(s=><option key={s.id} value={s.id}>{s.code} / {s.name} · {s.supported?'可拟合':'边界拒绝'}</option>)}</select></label>}

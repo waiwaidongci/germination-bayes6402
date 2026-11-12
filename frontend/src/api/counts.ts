@@ -1,0 +1,1 @@
+import {request} from './client';import {Count} from '../types/domain';export const getCounts=(id:number)=>request<Count[]>(`/studies/${id}/counts`);export const annotateCount=(id:number,note:string)=>request<Count>(`/counts/${id}`,{method:'PATCH',body:JSON.stringify({note})});
