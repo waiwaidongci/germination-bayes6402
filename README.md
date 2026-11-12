@@ -21,7 +21,7 @@ docker compose exec -T backend python -m scripts.seed_demo
 | analyst 批次分析员 | analyst@duocen.demo | Duocen2026! | 六页；核对n/k、创建研究、计数批注、补种说明 |
 | viewer 抽样阅读者 | viewer@duocen.demo | Duocen2026! | 六页只读；获批后下载汇总及完整预测PMF CSV |
 
-JWT角色后端真实执行，viewer写入403、analyst审批403、未批准导出403，已审阅建议不可重复审批。登录/计数批注/排队/worker完成/建议和审批写审计；登录IP每分钟最多30次。另有全局异常中间件，422校验handler只返回loc/msg文本，不回显NaN/Inf input，避免错误响应序列化成500。部署前修改JWT_SECRET及Compose内数据库口令。
+JWT角色后端真实执行，viewer写入403、analyst审批403、未批准导出403，已审阅建议不可重复审批。登录/计数批注/排队/worker接手、中断恢复、完成或失败/建议和审批写审计；登录IP每分钟最多30次。另有全局异常中间件，422校验handler只返回loc/msg文本，不回显NaN/Inf input，避免错误响应序列化成500。部署前修改JWT_SECRET及Compose内数据库口令。
 
 ## 一天的研究剧本
 
@@ -58,6 +58,17 @@ Beta-Binomial PMF口径见[SciPy官方文档](https://docs.scipy.org/doc/scipy/r
 L-BFGS-B设置maxiter2000/maxls50/gtol1e−8/ftol1e−13，全部起点保存初末形状、logL、状态、迭代/评估、原始目标梯度与投影梯度。只有优化器成功、目标/梯度有限且投影∞范数≤1e−4才接受，再选接受点中LL最高。边界的不可行下降方向投影为0，与[L-BFGS-B官方停止定义](https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.fmin_l_bfgs_b.html)一致；投影为0不消除贴边弱识别。形状接近边界或更高目标候选未收敛时标弱识别，绝不声称全局最优或稳定已知先验。物理报告形状最后裁到[.01,5000]，避免exp(log5000)的机器舍入超出数个ULP。
 
 当前DC-02真实拟合α=5000、β≈2143.357，5/10起点合格、alpha:upper，弱识别警示可见。原始负LL logshape梯度α方向非零而边界投影为0，诊断同时保留。
+
+## 中断恢复与单份有效结果
+
+每次claim在`bayes_runs.attempt_token`写入新令牌，状态/结果写入都以该令牌为条件（`UPDATE ... WHERE attempt_token=? AND status='running'`）。因此：
+
+- **中断自动恢复**：worker每10秒刷新该运行的lease，并在Redis写15秒TTL的心跳。sweep将心跳消失或lease超过`RUNNING_STALE_SECONDS`(默认90秒)的`running`行转为`recovering`，清空半份`result`，再按`queued`重新排队；`input_snapshot`、threshold、future_n保持提交时快照，重算结果与初次一致。
+- **排队/计算中重启**：启动时`queued`行重发唤醒（Redis只是唤醒信号，状态在库里），`running`行只在原worker已失联时才回收，不会误伤仍在计算的其他worker。重复唤醒只会让一个claim成功，其余worker静默丢弃。
+- **并发接手与迟到写回**：只有持有当前令牌的attempt能写completed/failed；被接手的旧worker即使算完也写不进去，只记`bayes.superseded`审计，库里保留一份有效结果。
+- **半份预测不外泄**：`GET /runs`与`/runs/{id}`仅在`completed`时返回`result`；`recovering`/`failed`的`result`为空。补种建议要求`completed`（否则409），导出要求`completed`（否则403），已完成研究与获批建议不被恢复流程改写。
+- **页面状态**：`phase`区分`waiting`（等待排队）、`recovering`（中断后重算，含`recovered`标记）、`calculating`（计算中）、`completed`、`failed`，失败显示错误并可重提。
+- 自动恢复次数上限`MAX_RECOVERIES`(默认3)，超过则标`failed`，避免无限重试；直接失败（非中断）不自动重试。
 
 ## 条件后验与同批预测
 
@@ -98,4 +109,4 @@ backend/src/{routes,controllers,services,models,schemas,middlewares,utils,consta
 
 角色枚举backend/constants/roles与frontend/constants/enums用于鉴权/显示，队列状态backend/constants/status与前端RunStatus用于worker/StatusBadge，审阅Literal在backend/schemas/note与model/service/前端ReviewStatus。环境变量COMPOSE_PROJECT_NAME、FRONTEND_PORT、BACKEND_PORT、DB_PORT、JWT_SECRET、SEED_DEMO在.env；DATABASE_URL/REDIS_URL由Compose定义。
 
-测试脚本、真实截图、关键JSON/CSV与已知差异在同批test-artifacts/gb-0032/TESTING.md，源码不放日志或截图。当前单worker，无来源上传、崩溃恢复、多worker去重或设备操作。清理仅本题：`docker compose down -v --remove-orphans`。MIT License。
+测试脚本、真实截图、关键JSON/CSV与已知差异在同批test-artifacts/gb-0032/TESTING.md，源码不放日志或截图。当前单worker，无来源上传或设备操作；中断恢复见上文，重复接手与迟到写回由claim token保证只保留一份有效结果。清理仅本题：`docker compose down -v --remove-orphans`。MIT License。

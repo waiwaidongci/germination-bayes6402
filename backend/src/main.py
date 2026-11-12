@@ -10,10 +10,12 @@ from . import models
 from .routes import auth,studies,lots,counts,runs,notes,audits
 from .middlewares.errors import ErrorMiddleware
 from .middlewares.rate_limit import RateLimitMiddleware
-from .services.run_service import queue
+from .services.run_service import queue_client
+from .config.schema_upgrade import upgrade_schema
 @asynccontextmanager
 async def lifespan(app):
     Base.metadata.create_all(engine)
+    upgrade_schema(engine)
     if SEED_DEMO:
         try:
             from scripts.seed_demo import seed
@@ -30,4 +32,4 @@ for module in [auth,studies,lots,counts,runs,notes,audits]:app.include_router(mo
 @app.get("/health")
 def health():
     with engine.connect() as c:c.execute(text("select 1"))
-    queue.ping();return {"status":"healthy","service":"germination-bayes"}
+    queue_client().ping();return {"status":"healthy","service":"germination-bayes"}

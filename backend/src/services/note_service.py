@@ -1,12 +1,13 @@
 from fastapi import HTTPException
 from ..models import BayesRun,SamplingNote
+from ..constants.status import RunStatus
 from ..utils.serialize import record
 from .audit_service import log
 
 def list_notes(db):return [record(n) for n in db.query(SamplingNote).order_by(SamplingNote.id.desc())]
 def create_note(db,data,user):
     run=db.get(BayesRun,data.run_id)
-    if not run or run.status!="completed":raise HTTPException(409,"只能对已完成批次概率研究提交补种建议")
+    if not run or run.status!=RunStatus.COMPLETED or not run.result:raise HTTPException(409,"只能对已完成批次概率研究提交补种建议")
     row=SamplingNote(**data.model_dump(),owner=user.name,status="submitted")
     db.add(row);db.flush();log(db,user.email,"sampling.submit",row.id);db.commit();return record(row)
 def review_note(db,nid,data,user):
